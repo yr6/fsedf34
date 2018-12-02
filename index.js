@@ -120,7 +120,7 @@ function secondsToString(seconds) {
 }
 
 bot.on('ready', function() {
-  bot.setStatus('online', config.status)
+  bot.user.setActivity('online', config.status)
   var msg = `
 -----------------------------
 Use 'git pull' to keep your bot updated
