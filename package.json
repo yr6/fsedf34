@@ -1,21 +1,30 @@
 {
-  "name": "discord-musicbot",
-  "version": "0.0.0",
-  "description": "A musicbot for discord made in node.js",
-  "main": "bot.js",
+  "name": "discord.js-heroku",
+  "version": "1.0.0",
+  "description": "An in-depth guide on deploying your Discord.js bot on Heroku",
+  "main": "index.js",
+  "engines": {
+    "node": "8.x",
+    "npm": "*"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tonkku107/discord-musicbot.git"
+    "url": "git+https://github.com/synicalsyntax/discord.js-heroku.git"
   },
-  "author": "Tonkku",
-  "license": "UNLICENSED",
+  "keywords": [
+    "heroku",
+    "discord.js"
+  ],
+  "author": "synicalsyntax",
+  "license": "MIT",
   "bugs": {
-    "url": "https://github.com/tonkku107/discord-musicbot/issues"
+    "url": "https://github.com/synicalsyntax/discord.js-heroku/issues"
   },
-  "homepage": "https://github.com/tonkku107/discord-musicbot#readme",
+  "homepage": "https://github.com/synicalsyntax/discord.js-heroku#readme",
   "dependencies": {
     "discordie": "^0.7.4",
     "m3u8": "0.0.7",
