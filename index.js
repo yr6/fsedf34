@@ -1,595 +1,560 @@
-const errorlog = require("./data/errors.json")
-const thing = require('mathjs')
-const maths = thing.parser()
-const Discord = require("discord.js")
-const started = Date()
-const config = require('./config.json')
-const bot = new Discord.Client()
-const notes = require('./data/notes.json')
-const os = require('os')
-const prefix = config.prefix
-const rb = "```"
-const sbl = require("./data/blservers.json")
-const ubl = require("./data/blusers.json")
-const fs = require("fs")
-const warns = require("./data/warns.json")
-const queues = {}
-const ytdl = require('ytdl-core')
-const search = require('youtube-search')
-const opts = {
-  part: 'snippet',
-  maxResults: 10,
-  key: config.youtube_api_key
+const Discordie = require('discordie');
+const Events = Discordie.Events;
+const client = new Discordie({autoReconnect: true});
+const config = require("./config");
+client.connect({token: process.env.bitch});
+const fs = require('fs');
+const request = require('request');
+const path = require('path');
+const youtubedl = require('youtube-dl');
+const m3u8 = require('m3u8');
+const stream = require('stream');
+
+var startup;
+var inviteURL;
+var permissions = "0";
+var music = {
+  summoners: {},
+  votes: {},
+  songQ: {},
+  streams: {}
 }
+var downloaders = [];
 
-function getQueue(guild) {
-  if (!guild) return
-  if (typeof guild == 'object') guild = guild.id
-  if (queues[guild]) return queues[guild]
-  else queues[guild] = []
-  return queues[guild]
-}
+client.Dispatcher.on(Events.GATEWAY_READY, e => {
+  console.log(`Connected as: ${client.User.username} - ${client.User.id}`);
+  startup = new Date();
+  if(config.showDefaultGame) client.User.setGame(config.defaultGame);
 
-var express = require("express")
-var app = express();
+  loadDownloaders();
 
-app.get("/queue/:guildid",function(req,res){
-  let queue = getQueue(req.params.guildid);
-    if(queue.length == 0) return res.send("Uh oh... No music!");
-    let text = '';
-    for(let i = 0; i < queue.length; i++){
-      text += `${(i + 1)}. ${queue[i].title} | by ${queue[i].requested}\n`
-    };
-  res.send(text)
-})
-        app.listen(config.server_port)
+  client.User.getApplication().then(app => {
+    inviteURL = "https://discordapp.com/oauth2/authorize?client_id="+app.id+"&scope=bot&permissions="+permissions;
+    console.log("Invite URL:" + inviteURL);
+  }).catch(e => {
+    console.log(e);
+    inviteURL = "https://discordapp.com/oauth2/authorize?client_id="+client.User.id+"&scope=bot&permissions="+permissions;
+    console.log("Invite URL:" + inviteURL);
+  });
 
-
-function play(msg, queue, song) {
-  if (!msg || !queue) return
-  if (song) {
-    search(song, opts, function(err, results) {
-      if (err) return bot.sendMessage(msg, "Video not found please try to use a youtube video.");
-      song = (song.includes("https://" || "http://")) ? song : results[0].link
-      let stream = ytdl(song, {
-        audioonly: true
-      })
-      let test
-      if (queue.length === 0) test = true
-      queue.push({
-        "title": results[0].title,
-        "requested": msg.author.username,
-        "toplay": stream
-      })
-      bot.sendMessage(msg, "Queued **" + queue[queue.length - 1].title + "**")
-      if (test) {
-        setTimeout(function() {
-          play(msg, queue)
-        }, 1000)
-      }
-    })
-  } else if (queue.length != 0) {
-    bot.sendMessage(msg, `Now Playing **${queue[0].title}** | by ***${queue[0].requested}***`)
-    let connection = bot.voiceConnections.get('server', msg.server)
-    if (!connection) return
-    connection.playRawStream(queue[0].toplay).then(intent => {
-      intent.on('error', () => {
-        queue.shift()
-        play(msg, queue)
-      })
-
-      intent.on('end', () => {
-        queue.shift()
-        play(msg, queue)
-      })
-    })
-  } else {
-    bot.sendMessage(msg, 'No more music in queue')
-  }
-}
-
-function secondsToString(seconds) {
-    try {
-        var numyears = Math.floor(seconds / 31536000);
-        var numdays = Math.floor((seconds % 31536000) / 86400);
-        var numhours = Math.floor(((seconds % 31536000) % 86400) / 3600);
-        var numminutes = Math.floor((((seconds % 31536000) % 86400) % 3600) / 60);
-        var numseconds = Math.round((((seconds % 31536000) % 86400) % 3600) % 60);
-
-        var str = "";
-        if(numyears>0) {
-            str += numyears + " year" + (numyears==1 ? "" : "s") + " ";
-        }
-        if(numdays>0) {
-            str += numdays + " day" + (numdays==1 ? "" : "s") + " ";
-        }
-        if(numhours>0) {
-            str += numhours + " hour" + (numhours==1 ? "" : "s") + " ";
-        }
-        if(numminutes>0) {
-            str += numminutes + " minute" + (numminutes==1 ? "" : "s") + " ";
-        }
-        if(numseconds>0) {
-            str += numseconds + " second" + (numseconds==1 ? "" : "s") + " ";
-        }
-        return str;
-    } catch(err) {
-        console.log("Could not get time")
-        return 'Could not get time';
+  fs.mkdir('songs', 0777, function(err){
+    if(err){
+      if(err.code == "EEXIST") return;
+      else throw err;
     }
-}
+  });
+});
 
-bot.on('ready', function() {
-  bot.user.setActivity('online', config.status)
-  var msg = `
------------------------------
-Use 'git pull' to keep your bot updated
-Logging in...
------------------------------`
+client.Dispatcher.on(Events.MESSAGE_CREATE, e => {
+  if(e.message.isPrivate){
+    console.log(`[DM] ${e.message.author.username}: ${e.message.content}`);
+  }else{
+    console.log(`[${e.message.guild.name} / #${e.message.channel.name}] ${e.message.author.username}: ${e.message.content}`);
+  }
 
-console.log(msg)
-console.log("Logged in and ready to respond...")
-})
+  if((config.cmdPrefix != "" && e.message.content.substring(0, config.cmdPrefix.length) === config.cmdPrefix) || (e.message.content.substring(0, 2) == "<@" && e.message.content.substring(0, 22).replace(/\D/g, "") == client.User.id) && e.message.author.id != client.User.id && !e.message.author.bot){
+    if (config.cmdPrefix != "" && e.message.content.substring(0, config.cmdPrefix.length) === config.cmdPrefix) var command = e.message.content.substring(config.cmdPrefix.length).split(' ');
+    else var command = e.message.content.substring(e.message.content.indexOf('>')+2).split(' ');
 
-bot.on("message", function(message) {
-  
-  if (sbl.indexOf(message.channel.server.id) != -1 && message.content.startsWith(prefix)) {
-    bot.sendMessage(message, "This server is blacklisted")
-    return
-  }
-  if (ubl.indexOf(message.sender.id) != -1 && message.content.startsWith(prefix)) {
-    bot.sendMessage(message, message.user + "! You are blacklisted and can not use the bot!")
-    return
-  }
-  if (message.content.startsWith(prefix + "ping")) {
-    bot.sendMessage(message, "Pong!", function(error, msg) {
-      if (!error) {
-        bot.updateMessage(msg, "Pong, **" + (msg.timestamp - message.timestamp) + "**ms")
-      }
-    })
-  }
-  if(message.content.startsWith(prefix + 'math')) {
     try{
-    var res = maths.eval(message.content.split(" ").splice(1).join(" "))
-  }catch(err){
-    var res = 'Could not calculate'
-  }
-    bot.sendMessage("```"+message,res+"```")
-  }
+      switch(command[0].toLowerCase()){
+        case "ping":
+          const ping = new Date();
+          e.message.channel.sendMessage("Pong!").then(msg => {
+            const pong = new Date() - ping;
+            msg.edit(`Pong! \`${pong}ms\``);
+          });
+          break;
+        case "status":
+          const servers = client.Guilds.length || 0;
+          const voice = client.VoiceConnections.length || 0;
 
-  if (message.content.startsWith(prefix + 'help')) {
-    bot.sendMessage(message, "Check your DM's **" + message.sender.name + "**")
-    bot.sendMessage(message.sender.id, `${rb}ruby
-${prefix}help - Shows this message.
-${prefix}ping - Ping/Pong with ms amount.
-${prefix}servers Shows amount of servers.
-${prefix}play - Plays the song you requested.
-${prefix}voteskip - You may vote to skip a song.
-${prefix}volume <volume> - Change the volume.
-${prefix}queue - Check the list of songs that are queued.
-${prefix}np/nowplaying - Check the current song out.
-${prefix}skip - Skips the playing song.
-${prefix}pause - Pause the current song.
-${prefix}deletewarn <user> - Deletes a warning from a user.
-${prefix}lookupwarn <user> - Lookup warning information on a user.
-${prefix}eval - Owner only.
-${prefix}clearqueue - Clears the list of queues.
-${prefix}say - Admin only.
-${prefix}resume - Resumes paused song.
-${prefix}shutdown - Power off the bot (Owner only).
-${prefix}invite - Creates OAuth URL for bot.
-${prefix}git - Sends link to github repo.
-${prefix}play - Plays a link that you have wanted it to.
-${prefix}userblacklist <add/remove> <user id> - Blacklists a user
-${prefix}warn <user> <reason> - Warns a user for the thing they did wrong.
-${prefix}reminder <time>|<reminder> - Reminds you of something in a certain time
-${prefix}serverblacklist <add/remove> <server id> - Adds or removes servers from blacklist
-${prefix}note - Takes a note
-${prefix}mynotes - Shows notes you have taken
-${prefix}math <maths> - evaluates math equations
-${prefix}uptime - Shows bot uptime
-${prefix}sys - Gets system information${rb}`)
-  }
-  if (message.content.startsWith(prefix + 'servers')) {
-    bot.sendMessage(message, "I'm currently on **" + bot.servers.length + "** server(s)")
-  }
-  if(message.content === prefix + 'uptime'){
-    bot.sendMessage(message,"I have been up for `"+secondsToString(process.uptime())+"` - My process was started at this time --> `"+started+"`")
-  }
-
-  if (message.content.startsWith(prefix + 'play')) {
-    if (!bot.voiceConnections.get('server', message.server)) {
-      if (!message.author.voiceChannel) return bot.sendMessage(message, 'You need to be in a voice channel')
-      bot.joinVoiceChannel(message.author.voiceChannel)
-    }
-    let suffix = message.content.split(" ").slice(1).join(" ")
-    if (!suffix) return bot.sendMessage(message, 'You need to a song link or a song name')
-    play(message, getQueue(message.server.id), suffix)
-  }
-
-  if(message.content.startsWith(prefix + 'sys')){
-    bot.sendMessage(message, "```xl\nSystem info: " + process.platform + "-" + process.arch + " with " + process.release.name + " version " + process.version.slice(1) + "\nProcess info: PID " + process.pid + " at " + process.cwd() + "\nProcess memory usage: " + Math.ceil(process.memoryUsage().heapTotal / 1000000) + " MB\nSystem memory usage: " + Math.ceil((os.totalmem() - os.freemem()) / 1000000) + " of " + Math.ceil(os.totalmem() / 1000000) + " MB\nBot info: ID " + bot.user.id + " #" + bot.user.discriminator + "\n```");
-        }
-  if (message.content.startsWith(prefix + "serverblacklist")) {
-    if (message.sender.id === config.owner_id || config.admins.indexOf(msg.author.id)!= -1) {
-      let c = message.content.split(" ").splice(1).join(" ")
-      let args = c.split(" ")
-      console.log("[DEVELOPER DEBUG] Blacklist args were: " + args)
-      if (args[0] === "remove") {
-        sbl.splice(sbl.indexOf(args[1]))
-        fs.writeFile("./data/blservers.json", JSON.stringify(sbl))
-      } else if (args[0] === "add") {
-        sbl.push(args[1])
-        fs.writeFile("./data/blservers.json", JSON.stringify(sbl))
-      } else {
-        bot.sendMessage(message, `You need to specify what to do! ${prefix}serverblacklist <add/remove> <server id>`)
-      }
-    } else {
-      bot.sendMessage(message, "Sorry, this command is for the owner only.")
-    }
-
-  }
-  if(message.content.startsWith(prefix + 'note')) {
-    if(notes[message.author.id] === undefined){
-      notes[message.author.id] = {
-        'notes':[]
-      }
-    }
-    notes[message.author.id].notes[notes[message.author.id].notes.length] = {
-      'content':message.cleanContent.split(" ").splice(1).join(" "),
-      'time':Date()
-    }
-    fs.writeFile('./data/notes.json',JSON.stringify(notes),function(err){
-      if(err) return;
-      bot.sendMessage(message,'Added to notes! Type `'+prefix+'mynotes` to see all your notes')
-    })
-  }
-  if(message.content === prefix + 'mynotes'){
-    var nutes = 'Here are your notes:\n\n```'
-    for(var i = 0;i < notes[message.author.id].notes.length;i++){
-      nutes += `${i + 1}) '${notes[message.author.id].notes[i].content}' - Added ${notes[message.author.id].notes[i].time}\n`
-    }
-
-    nutes += "```"
-    bot.sendMessage(message,nutes)
-  }
-  if (message.content.startsWith(prefix + "userblacklist")) {
-    if (message.sender.id === config.owner_id || config.admins.indexOf(message.author.id)!= -1) {
-      let c = message.content.split(" ").splice(1).join(" ")
-      let args = c.split(" ")
-      console.log("[DEVELOPER DEBUG] Blacklist args were: " + args)
-      if (args[0] === "remove") {
-        ubl.splice(ubl.indexOf(args[1]))
-        fs.writeFile("./data/blusers.json", JSON.stringify(ubl))
-      } else if (args[0] === "add") {
-        ubl.push(args[1])
-        fs.writeFile("./data/blusers.json", JSON.stringify(sbl))
-      } else {
-        bot.sendMessage(message, `You need to specify what to do! ${prefix}serverblacklist <add/remove> <server id>`)
-      }
-    } else {
-      bot.sendMessage(message, "Sorry, this command is for the owner only.")
-    }
-
-  }
-
-  if(message.content.startsWith(prefix + "clearqueue")){
-    if(message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1 || message.server.permissionsOf(message.author).hasPermission('MANAGE_SERVER')){
-     let queue = getQueue(message.server.id);
-     if(queue.length == 0) return bot.sendMessage(message, `No music in queue`);
-     for(var i = queue.length - 1;  i >= 0; i--){
-            queue.splice(i, 1);
-     }
-     bot.sendMessage(message, `Cleared the queue`)
-    }else{
-      bot.sendMessage(message, 'Only the admins can do this command');
-    }
-}
-
-  if(message.content.startsWith(prefix + "lookupwarn")){
-    if(message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1 || message.server.permissionsOf(message.author).hasPermission('MANAGE_SERVER')){
-      let user = message.mentions[0];
-      if(!user) return bot.sendMessage(message, "You need to mention the user");
-      let list = Object.keys(warns);
-      let found = '';
-      let foundCounter = 0;
-      let warnCase;
-      //looking for the case id
-      for(let i = 0; i < list.length; i++){
-          if(warns[list[i]].user.id == user.id){
-              foundCounter++;
-              found += `${(foundCounter)}. Username: ${warns[list[i]].user.name}\nAdmin: ${warns[list[i]].admin.name}\nServer: ${warns[list[i]].server.name}\nReason: ${warns[list[i]].reason}\n`;
+          const now = new Date();
+          const uptime = getTimeInBetween(now, other.startup);
+          e.message.channel.sendMessage("", false, {
+            color: null, //change if you feel like it
+            author: {name: client.User.username, icon_url: client.User.avatarURL, url: other.inviteURL},
+            title: "Bot status",
+            fields:[
+              {name:"I am connected to", value:`**${servers}** ${servers == 1 ? "server" : "servers"}\n**${voice}** ${voice == 1 ? "voice channel" : "voice channels"}`},
+              {name: "I have been online for", value:`${uptime.days}d ${uptime.hours}h ${uptime.minutes}m ${uptime.seconds}s`},
+            ],
+            timestamp: now,
+          });
+          break;
+        case "invite":
+          if (config.allowInvite) e.message.channel.sendMessage("Use this link to invite me to your server: \n"+inviteURL);
+          break;
+        case "help":
+          var help = "```\nBot commands:";
+          help += "\n"+config.cmdPrefix+"ping - pong! (Also tells the ping in ms)";
+          help += "\n"+config.cmdPrefix+"status - Tells you what's the bot's current status";
+          if(config.allowInvite) help += "\n"+config.cmdPrefix+"invite - Gives an invite link you can use to invite the bot to your own channel";
+          help += "\n"+config.cmdPrefix+"summon - Makes the bot join the voice channel";
+          help += "\n"+config.cmdPrefix+"disconnect - Disconnects the bot from the voice channel";
+          help += "\n"+config.cmdPrefix+"play [URL / Search term] - Plays a song or adds it to the queue";
+          help += "\n"+config.cmdPrefix+"stop - Stops playing and clears the queue";
+          help += "\n"+config.cmdPrefix+"skip - Skips the current song and moves on to the next in queue";
+          help += "\n"+config.cmdPrefix+"queue - Shows what's in the queue";
+          help += "\n"+config.cmdPrefix+"clear - Clears the queue, but keeps the current song playing";
+          help += "\n"+config.cmdPrefix+"remove [song id] - Removes that specific song from queue";
+          help += "\n"+config.cmdPrefix+"song - Shows what song is currently playing";
+          help += "\nPlease note that the music bot downloads the songs before playing. Be patient.\n```";
+          help += "\nhttps://github.com/tonkku107/discord-musicbot";
+          e.message.channel.sendMessage(help);
+          break;
+        case "summon":
+        case "join":
+          if(client.User.getVoiceChannel(e.message.guild)) return;
+          const channel = e.message.author.getVoiceChannel(e.message.guild);
+          if(channel){
+            channel.join(false, false).then(info => {
+              music.summoners[e.message.guild.id] = e.message.author.id;
+              e.message.channel.sendMessage("✅ Ready to play");
+            }, err => {
+              e.message.channel.sendMessage(`❌ Error \`${err.response.body.message}\``);
+            });
+          }else{
+            e.message.channel.sendMessage("❌ You are not in a voice channel");
           }
-      }
-      if(foundCounter == 0) return bot.sendMessage(message, 'Nothing found for this user');
-      bot.sendMessage(message, `Found ${foundCounter} warns\n ${found}`);
-    }else{
-      bot.sendMessage(message, 'Only the admins can do this command');
-    }
-}
-
-  if (message.content.startsWith(prefix + 'skip')) {
-    if(message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1 || message.server.permissionsOf(message.author).hasPermission('MANAGE_SERVER')){
-      let player = bot.voiceConnections.get('server', message.server);
-      if(!player || !player.playing) return bot.sendMessage(message, 'The bot is not playing');
-      player.stopPlaying()
-      bot.sendMessage(message, 'Skipping song...');
-    }else{
-      bot.sendMessage(message, 'Only the admins can do this command');
-    }
-  }
-
-  if(message.content.startsWith(prefix + "deletewarn")){
-    if (message.channel.permissionsOf(message.sender).hasPermission("kickMembers") || message.channel.permissionsOf(message.sender).hasPermission("banMembers") || message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1) {
-        let user = message.mentions[0];
-        if(!user) return bot.sendMessage(message, "You need to mention the user");
-        let list = Object.keys(warns);
-        let found;
-        //looking for the case id
-        for(let i = 0; i < list.length; i++){
-            if(warns[list[i]].user.id == user.id){
-                found = list[i];
-                break;
+          break;
+        case "disconnect":
+        case "dc":
+        case "leave":
+          if(!client.User.getVoiceChannel(e.message.guild)) return e.message.channel.sendMessage("❌ I am not in a voice channel");
+          if((config.limitToSummoner && (!client.User.getVoiceChannel(e.message.guild).members.find(obj => obj.id == music.summoners[e.message.guild.id]) || e.message.author.id == music.summoners[e.message.guild.id] || e.message.author.id == config.ownerID)) || !config.limitToSummoner) {
+            dcVoice(client.User.getVoiceChannel(e.message.guild), e);
+          }else{
+            e.message.channel.sendMessage("🚫 Only the person who added me can make me leave");
+          }
+          break;
+        case "play":
+        case "add":
+          var args = command.splice(1).join(' ');
+          if(args) {
+            if(!client.User.getVoiceChannel(e.message.guild)){
+              const channel = e.message.author.getVoiceChannel(e.message.guild);
+              if(channel){
+                channel.join(false, false).then(info => {
+                  music.summoners[e.message.guild.id] = e.message.author.id;
+                }, err => {
+                  e.message.channel.sendMessage(`❌ Error \`${err.response.body.message}\``);
+                });
+              }else{
+                return e.message.channel.sendMessage("❌ You are not in a voice channel");
+              }
             }
-        }
-        if(!found) return bot.sendMessage(message, 'Nothing found for this user');
-        bot.sendMessage(message, `Delete the case of ${warns[found].user.name}\nReason: ${warns[found].reason}`);
-        delete warns[found];
-        fs.writeFile("./data/warns.json", JSON.stringify(warns))
-    }else{
-        bot.sendMessage(message, "You have to be able to kick/ban members to use this command")
-    }
-}
-
-  if (message.content.startsWith(prefix + 'pause')) {
-    if(message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1){
-      let player = bot.voiceConnections.get('server', message.server);
-      if(!player || !player.playing) return bot.sendMessage(message, 'The bot is not playing');
-      player.pause();
-      bot.sendMessage(message, "Pausing music...");
-    }else{
-      bot.sendMessage(message, 'Only the admins can use this command');
-    }
-  }
-
-  if (message.content.startsWith(prefix + 'reminder')) {
-    try {
-      let c = message.content.substring(message.content.indexOf(' ') + 1, message.content.length)
-      let msg = c.split(" ").splice(1).join(" ").split("|")
-      msg[0] = msg[0].replace(/\s/g, '')
-      let time = parseTime(msg[0])
-      let reminder = msg[1].trim()
-      message.reply("I will PM you a reminder to " + reminder + " in " + time + "!")
-      setTimeout(function() {
-        message.author.sendMessage(message.author + " Reminder: " + reminder)
-      }, time.countdown)
-
-      function parseTime(str) {
-        let num, time
-        if (str.indexOf(" ") > -1) {
-          num = str.substring(0, str.indexOf(" "))
-          time = str.substring(str.indexOf(" ") + 1).toLowerCase()
-        } else {
-          for (let i = 0; i < str.length; i++) {
-            if (str.substring(0, i) && !isNaN(str.substring(0, i)) && isNaN(str.substring(0, i + 1))) {
-              num = str.substring(0, i)
-              time = str.substring(i)
-              break
+            url = resolveURL(args);
+            downloadSong(url, e.message.author, e.message.channel, info => {
+              if(!music.songQ[e.message.guild.id]){
+                if(info.protocol != "m3u8"){
+                  music.streams[e.message.guild.id] = playSong(info.filepath, e.message.channel, client, config);
+                  e.message.channel.sendMessage(`🎶 Now Playing: **${info.title}**`);
+                }
+                else{
+                  music.streams[e.message.guild.id] = playSong(info.url, e.message.channel, client, config);
+                  e.message.channel.sendMessage(`🎶 Now Playing: **${info.title}** \`[STREAM]\``);
+                }
+                music.songQ[e.message.guild.id] = {};
+                music.songQ[e.message.guild.id].q = [];
+                music.songQ[e.message.guild.id].now = info;
+              }else{
+                if(info.protocol == "m3u8") return e.message.channel.sendMessage("❌ Streams must be added to an empty queue");
+                music.songQ[e.message.guild.id].q.push(info);
+                e.message.channel.sendMessage(`✅ \`${info.title}\` Added to queue! Position: #${music.songQ[e.message.guild.id].q.length}`);
+              }
+            });
+          }else{
+            e.message.channel.sendMessage("❌ Please specify a song or an URL");
+          }
+          break;
+        case "stop":
+          if(client.User.getVoiceChannel(e.message.guild) && (config.limitToSummoner && (!client.User.getVoiceChannel(e.message.guild).members.find(obj => obj.id == music.summoners[e.message.guild.id]) || e.message.author.id == music.summoners[e.message.guild.id] || e.message.author.id == config.ownerID)) || !config.limitToSummoner) {
+            stopSong(e.message.channel, true, true);
+          }else{
+            if(client.User.getVoiceChannel(e.message.guild)) e.message.channel.sendMessage("🚫 Only person who added me can stop.");
+          }
+          break;
+        case "skip":
+          if(client.User.getVoiceChannel(e.message.guild)){
+            if((config.limitToSummoner && (e.message.author.id == music.summoners[e.message.guild.id] || e.message.author.id == config.ownerID)) || !config.voteSkip) {
+              stopSong(e.message.channel, false, false);
+            }else{
+              var usersAmount = client.User.getVoiceChannel(e.message.guild).members.length;
+              if(music.votes[e.message.guild.id]){
+                var votes = music.votes[e.message.guild.id]
+                if(music.votes[e.message.guild.id].includes(e.message.author.id)){
+                  if(calculateVotes(usersAmount) <= votes.length){
+                    stopSong(e.message.channel, false, false);
+                  }else{
+                    e.message.channel.sendMessage(`⚠ Your vote is already there, we need ${calculateVotes(usersAmount) - votes.length} more.`);
+                  }
+                }else{
+                  votes.push(e.message.author.id);
+                  if(calculateVotes(usersAmount) <= votes.length){
+                    stopSong(e.message.channel, false, false);
+                  }else{
+                    e.message.channel.sendMessage(`✅ Your vote has been added, we need ${calculateVotes(usersAmount) - votes.length} more.`);
+                  }
+                }
+              }else{
+                music.votes[e.message.guild.id] = [];
+                music.votes[e.message.guild.id].push(e.message.author.id);
+                var votes = music.votes[e.message.guild.id];
+                if(calculateVotes(usersAmount) <= votes.length){
+                  stopSong(e.message.channel, false, false);
+                }else{
+                  e.message.channel.sendMessage(`✅ Your vote has been added, we need ${calculateVotes(usersAmount) - votes.length} more.`);
+                }
+              }
             }
           }
-        }
-        if (!num || isNaN(num) || num < 1 || !time || ["d", "day", "days", "h", "hr", "hrs", "hour", "hours", "m", "min", "mins", "minute", "minutes", "s", "sec", "secs", "second", "seconds"].indexOf(time) == -1) {
-          return
-        }
-        let countdown = 0
-        switch (time) {
-          case "d":
-          case "day":
-          case "days":
-            countdown = num * 86400000
-            break
-          case "h":
-          case "hr":
-          case "hrs":
-          case "hour":
-          case "hours":
-            countdown = num * 3600000
-            break
-          case "m":
-          case "min":
-          case "mins":
-          case "minute":
-          case "minutes":
-            countdown = num * 60000
-            break
-          case "s":
-          case "sec":
-          case "secs":
-          case "second":
-          case "seconds":
-            countdown = num * 1000
-            break
-        }
-        return {
-          num: num,
-          time: time,
-          countdown: countdown
-        }
+          break;
+        case "queue":
+        case "playlist":
+        case "list":
+          if(client.User.getVoiceChannel(e.message.guild)){
+            if(music.songQ[e.message.guild.id] && music.songQ[e.message.guild.id].q.length != 0){
+              var songcount = music.songQ[e.message.guild.id].q.length;
+              var origcount = music.songQ[e.message.guild.id].q.length;
+              if(songcount > config.queueDisplaySize)
+                songcount = config.queueDisplaySize;
+              var remaining = origcount - songcount;
+              if(music.songQ[e.message.guild.id].now.protocol != "m3u8"){
+                var queuestring = "Now Playing: **"+music.songQ[e.message.guild.id].now.title+"**";
+              }else{
+                var queuestring = "Now Playing: **"+music.songQ[e.message.guild.id].now.title+"** `[STREAM]`";
+              }
+              if(origcount == 1){
+                queuestring += "\n\nThere is just "+origcount+" song in queue:";
+              }else{
+                queuestring += "\n\nThere are "+origcount+" songs in queue:";
+              }
+              for (i=1; i < songcount+1; i++){
+                queuestring += "\n`"+i+".` "+music.songQ[e.message.guild.id].q[i-1].title+" - queued by @**"+music.songQ[e.message.guild.id].q[i-1].user.username+"**";
+              }
+              if(remaining > 0)
+                queuestring += "\n+"+remaining+" more";
+              e.message.channel.sendMessage(queuestring);
+            }else if(music.songQ[e.message.guild.id] && music.songQ[e.message.guild.id].now){
+              if(music.songQ[e.message.guild.id].now.protocol != "m3u8") e.message.channel.sendMessage(`Now Playing: **${music.songQ[e.message.guild.id].now.title}**\n\nQueue is empty.`);
+              else e.message.channel.sendMessage(`Now Playing: **${music.songQ[e.message.guild.id].now.title} \`[STREAM]\`**\n\nQueue is empty.`);
+            }else{
+              e.message.channel.sendMessage("❌ There's nothing in the queue.");
+            }
+          }
+          break;
+        case "clear":
+        case "clearqueue":
+          if(client.User.getVoiceChannel(e.message.guild) && (config.limitToSummoner && (!client.User.getVoiceChannel(e.message.guild).members.find(obj => obj.id == music.summoners[e.message.guild.id]) || e.message.author.id == music.summoners[e.message.guild.id] || e.message.author.id == config.ownerID)) || !config.limitToSummoner) {
+            clearQueue(e.message.channel, true);
+          }else{
+            if(client.User.getVoiceChannel(e.message.guild)) e.message.channel.sendMessage("❌ Only person who added me can clear the queue.");
+          }
+          break;
+        case "remove":
+          if(client.User.getVoiceChannel(e.message.guild) && (config.limitToSummoner && (!client.User.getVoiceChannel(e.message.guild).members.find(obj => obj.id == music.summoners[e.message.guild.id]) || e.message.author.id == music.summoners[e.message.guild.id] || e.message.author.id == config.ownerID)) || !config.limitToSummoner) {
+            if(parseInt(command[1])){
+              if(music.songQ[e.message.guild.id] && music.songQ[e.message.guild.id].q[command[1]-1]){
+                var removed = music.songQ[e.message.guild.id].q[command[1]-1];
+                fs.unlink(removed.filepath, (err) => {if(err)console.log(err);});
+                music.songQ[e.message.guild.id].q.splice(command[1]-1, 1);
+                e.message.channel.sendMessage(`✅ Removed \`${removed.title}\` from the queue`);
+              }else{
+                e.message.channel.sendMessage("❌ A song with that position was not found");
+              }
+            }else{
+              e.message.channel.sendMessage("❌ Please specify position number of a song");
+            }
+          }else{
+            e.message.channel.sendMessage("❌ Only person who added me can remove queued songs.");
+          }
+          break;
+          case "song":
+          case "currentsong":
+          case "current":
+          case "now":
+            if(music.songQ[e.message.guild.id] && music.songQ[e.message.guild.id].now){
+              if(music.songQ[e.message.guild.id].now.protocol != "m3u8") e.message.channel.sendMessage(`🎶 Now Playing: **${music.songQ[e.message.guild.id].now.title}**`);
+              else e.message.channel.sendMessage(`🎶 Now Playing: **${music.songQ[e.message.guild.id].now.title}** \`[STREAM]\``);
+            }else{
+              e.message.channel.sendMessage("❌ Nothing is playing");
+            }
+            break;
       }
-    } catch (err) {
-      message.channel.sendMessage("Invalid arguments.")
+    } catch(err){
+      console.log(err);
+      try {e.message.channel.sendMessage("❌ An error ocurred");}catch(err2){/*lol*/};
     }
   }
+});
 
-  if (message.content.startsWith(prefix + 'shutdown')) {
-    if (message.sender.id === config.owner_id || config.admins.indexOf(message.author.id)!= -1) {
-      bot.sendMessage(message, "Shutdown has been **initiated**.\nShutting down...")
-      setTimeout(function() {
-        bot.logout()
-      }, 1000)
-      setTimeout(function() {
-        process.exit()
-      }, 2000)
+client.Dispatcher.on(Events.DISCONNECTED, e => {
+  console.log(`Disconnected. ${e.error}`);
+  if(e.autoReconnect) console.log(`Reconnecting in ${e.delay}`);
+});
+
+client.Dispatcher.on(Events.VOICE_DISCONNECTED, event => {
+  if(event.voiceConnection.guild.id && music.songQ[event.voiceConnection.guild.id]){
+    function reconnect(channel) {
+      channel.join().catch(err => setTimeout(reconnect(channel), 5000));
+    }
+
+    const channel = event.voiceConnection.channel;
+    if (!channel) return;
+    if (event.endpointAwait) {
+      event.endpointAwait.catch(err => {
+        setTimeout(() => reconnect(channel), 5000);
+      });
+      return;
+    }
+    setTimeout(() => reconnect(channel), 5000);
+  }
+});
+
+const loadDownloaders = () => {
+  fs.readdir('downloaders', (err, files) => {
+    files.forEach((file, index) => {
+      if(file.endsWith('.js')){
+        downloaders.push(require(`./downloaders/${file}`));
+        console.log(`[Music Downloader] ${file} loaded`);
+      }
+    });
+  });
+};
+
+const sendSelfDestructMessage = (channel, message, delay) => {
+  channel.sendMessage(message).then(msg => {
+    setTimeout(() => {
+      msg.delete();
+    }, delay);
+  });
+};
+
+const stopSong = (channel, clearQ, announce) => {
+  delete music.votes[channel.guild.id];
+  if(clearQ){
+    clearQueue(channel, false);
+    if(announce) channel.sendMessage("✅ Queue cleared and song stopped!");
+  }
+  if(music.streams[channel.guild.id]){
+    music.streams[channel.guild.id].encoder.stop();
+    if(!clearQ) channel.sendMessage("✅ Song skipped!");
+  }
+};
+
+const clearQueue = (channel, announce) => {
+  if(music.songQ[channel.guild.id]){
+    music.songQ[channel.guild.id].q.forEach(v => {
+      fs.unlink(v.filepath, (err) => {if(err)console.log(err);});
+    });
+    music.songQ[channel.guild.id].q = [];
+    if(announce) channel.sendMessage("✅ Queue cleared!");
+  }
+};
+
+const dcVoice = (channel, e) => {
+  stopSong(channel, true);
+  channel.leave();
+  if(music.songQ[channel.guild.id] && music.songQ[channel.guild.id].now) fs.unlink(music.songQ[channel.guild.id].now.filepath, (err) => {if(err)console.log(err);});
+  delete music.songQ[channel.guild.id];
+  delete music.votes[channel.guild.id];
+  delete music.summoners[channel.guild.id];
+  e.message.channel.sendMessage("✅ Disconnected from voice channel");
+};
+
+const resolveURL = (args) => {
+  var regexp = /(http|https):\/\/(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?/
+  args = args.split(' ');
+  if(args[0].startsWith(":")){
+    return args;
+  }
+  for(dler of downloaders){
+    if(dler.urlReg.test(args[0])){
+      return dler.formatURL(args);
     }
   }
+  if(regexp.test(args[0])){
+    return args;
+  }else{
+    args[0] = "ytsearch:"+args.join(' ')
+    return args;
+  }
+};
 
-if (message.content.startsWith(prefix + 'warn')) {
-    if (message.channel.permissionsOf(message.sender).hasPermission("kickMembers") || message.channel.permissionsOf(message.sender).hasPermission("banMembers")) {
-      let c = message.content
-      let usr = message.mentions[0]
-      if(!usr) return bot.sendMessage(message, "You need to mention the user");
-      let rsn = c.split(" ").splice(1).join(" ").replace(usr, "").replace("<@!" + usr.id + ">", "")
-      let caseid = genToken(20)
+const generateUUID = () => {
+  var d = new Date().getTime();
 
-      function genToken(length) {
-        let key = ""
-        let possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = (d + Math.random()*16)%16 | 0;
+      d = Math.floor(d/16);
+      return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+  });
+  return uuid;
+};
 
-        for (let i = 0; i < length; i++) {
-          key += possible.charAt(Math.floor(Math.random() * possible.length))
+const downloadSong = (url, user, channel, cb) => {
+    const _download = (url, data, playlist) => {
+      var filename = generateUUID() + ".mp3";
+      var songpath = path.join(__dirname + '/songs/', filename);
+      var downloaded = 0;
+      var songInfo;
+      var video = youtubedl(url, ['-f', 'bestaudio/best'], {cwd: __dirname, maxBuffer: Infinity});
+      channel.sendTyping();
+      video.on('info', info => {
+        songInfo = info;
+        songInfo.filepath = songpath;
+        songInfo.user = user;
+        for(prop in data){
+          songInfo[prop] = data[prop];
         }
-
-        return key
+        console.log('Download started');
+        console.log('title: ' + info.title);
+        console.log('size: ' + info.size);
+        sendSelfDestructMessage(channel, `⬇ Downloading \`${info.title}\`... `, 3500);
+        const simulateDownload = (firstTime) => {
+          var typingTime = 5000;
+          if(firstTime) typingTime = 50;
+          channel.sendTyping().then(() => {
+            setTimeout(() => {
+              if(!downloaded) simulateDownload();
+            }, typingTime);
+          });
+        }
+        simulateDownload(true);
+      });
+      video.pipe(fs.createWriteStream(songpath));
+      video.on('end', () => {
+        console.log("Download Complete!");
+        if(songInfo.protocol == "m3u8") fs.unlink(songpath, (err) => {if(err)console.log(err);});
+        downloaded = 1;
+        cb(songInfo);
+        if(playlist && playlist.length) _next(playlist[0].url, playlist[0].data, playlist.splice(1))
+      });
+      video.on('error', err => {
+        console.log(err);
+        fs.unlink(songpath, (err) => {if(err)console.log(err);});
+        var spot = err.toString().indexOf("ERROR: ");
+        channel.sendMessage("```"+err.toString().substring(spot)+"```");
+      });
+      var _next = (url, data, playlist) => {
+        setTimeout(() => _download(url, data, playlist), 1000);
       }
-
-      warns[caseid] = {
-        "admin": {
-          "name": message.sender.name,
-          "discrim": message.sender.discriminator,
-          "id": message.sender.id
-        },
-        "user": {
-          "name": usr.name,
-          "discrim": usr.discrim,
-          "id": usr.id
-        },
-        "server": {
-          "name": message.channel.server.name,
-          "id": message.channel.server.id,
-          "channel": message.channel.name,
-          "channel_id": message.channel.id
-        },
-        "reason": rsn
-      }
-      bot.sendMessage(message, usr + " was warned for `" + rsn + "`, check logs for more info")
-      fs.writeFile("./data/warns.json", JSON.stringify(warns))
-    } else {
-      bot.sendMessage(message, "You have to be able to kick/ban members to use this command")
-    }
-  }
-
-  if (message.content.startsWith(prefix + 'say')) {
-    if (message.sender.id === config.owner_id || config.admins.indexOf(message.author.id)!= -1) {
-      let say = message.content.split(" ").splice(1).join(" ")
-      bot.sendMessage(message, say)
-    }
-  }
-
-  if (message.content.startsWith(prefix + 'eval')) {
-    if (message.sender.id === config.owner_id) {
-      try {
-        let code = message.content.split(" ").splice(1).join(" ")
-
-        let result = eval(code)
-
-
-        bot.sendMessage(message, "```diff\n+ " + result + "```")
-
-      } catch (err) {
-
-        bot.sendMessage(message, "```diff\n- " + err + "```")
-      }
-    } else {
-      bot.sendMessage(message, "Sorry, you do not have permissisons to use this command, **" + message.author.name + "**.")
-
-    }
-  }
-
-  if (message.content.startsWith(prefix + 'volume')) {
-
-    let suffix = message.content.split(" ")[1];
-    let player = bot.voiceConnections.get('server', message.server);
-    if(!player || !player.playing) return bot.sendMessage(message, 'No, music is playing at this time.');
-    if(!suffix) {
-        bot.sendMessage(message, `The current volume is ${(player.getVolume() * 50)}`);
-    }else if(message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1){
-        let volumeBefore = player.getVolume();
-        let volume = parseInt(suffix);
-        if(volume > 50) return bot.sendMessage(message, "The music can't be higher then 50");
-        player.setVolume((volume / 50));
-        bot.sendMessage(message, `Volume changed from ${(volumeBefore * 50)} to ${volume}`);
-    }else{
-      bot.sendMessage(message, 'Only the admins can change the volume');
-    }
-}
-
-if (message.content.startsWith(prefix + 'resume')) {
-    if(message.server.owner.id == message.author.id || message.author.id == config.owner_id || config.admins.indexOf(message.author.id) != -1){
-      let player = bot.voiceConnections.get('server', message.server);
-      if(!player) return bot.sendMessage(message, 'No, music is playing at this time.');
-      if( player.playing) return bot.sendMessage(message, 'The music is already playing');
-      player.resume();
-      bot.sendMessage(message, "Resuming music...");
-    }else{
-      bot.sendMessage(message, 'Only the adminds can do this command');
-    }
-}
-
-
-
-  if (message.content.startsWith(prefix + 'invite')) {
-    bot.sendMessage(message, "My OAuth URL: " + `http://discordapp.com/oauth2/authorize?client_id=${config.client_id}&scope=bot`)
-  }
-  if (message.content.startsWith(prefix + 'git')) {
-    bot.sendMessage(message, "GitHub URL: **https://github.com/developerCodex/musicbot**")
-  }
-
-  if (message.content.startsWith(prefix + 'about') || message.mentions[0] === bot.user) {
-// Please do not change this... It is in the license
-if(message.content === bot.user + ' help'){
-  var cdb = '```'
-  var msg = `${cdb}fix
-This is an instance of developerCodex's Open source musicbot
-I am written in node.js and use ytdl to source songs and play them!
-To see all my commands type ${prefix}help.${cdb}`
-bot.sendMessage(message, msg)
-return;
-}
-    var cdb = '```'
-    var msg = `${cdb}fix
-This is an instance of developerCodex's Open source musicbot
-I am written in node.js and use ytdl to source songs and play them!
-To see all my commands type ${prefix}help.${cdb}`
-bot.sendMessage(message,msg)
-  }
-
-  if (message.content.startsWith(prefix + 'np') || message.content.startsWith(prefix + 'nowplaying')) {
-    let queue = getQueue(message.server.id);
-    if(queue.length == 0) return bot.sendMessage(message, "No music in queue");
-    bot.sendMessage(message, `${rb}xl\nCurrently playing: ${queue[0].title} | by ${queue[0].requested}${rb}`);
-}
-
-if (message.content.startsWith(prefix + 'queue')) {
-    let queue = getQueue(message.server.id);
-    if(queue.length == 0) return bot.sendMessage(message, "No music in queue");
-    let text = '';
-    for(let i = 0; i < queue.length; i++){
-      text += `${(i + 1)}. ${queue[i].title} | by ${queue[i].requested}\n`
+      video.on('next', _next);
     };
-    bot.sendMessage(message, `${rb}xl\n${text}${rb}`);
-  }
-    }catch(err){
-  console.log("WELL LADS LOOKS LIKE SOMETHING WENT WRONG! Visit MusicBot server for support (https://discord.gg/UbwFDM6) and quote this error:\n\n\n"+err.stack)
-  errorlog[String(Object.keys(errorlog).length)] = {
-"code":err.code,
-    "error":err,
-    "stack":err.stack
-  }
-  fs.writeFile("./data/errors.json",JSON.stringify(errorlog),function(err){
-    if(err) return "Even worse we couldn't write to our error log file! make sure data/errors.json still exists!";
-  })
+      channel.sendTyping();
+      if(url[0].startsWith(":")){
+        downloaders.find(d => ":"+d.prefix+":" == url[0].substring(0, url[0].substr(1).indexOf(":")+2)).download(url, {user: user}, (err, res) => {
+          if(err) return channel.sendMessage("Error: `"+err.message+'`');
+          if(res[0].direct) cb(res[0].data)
+          else{
+            _download(res[0].url, res[0].data, res.splice(1));
+          }
+        });
+      }else{
+        _download(url[0]);
+      }
+};
 
+const playSong = (file, channel, client, config) => {
+  var voice = client.VoiceConnections.find(obj => obj.voiceConnection.guildId == channel.guild.id);
+  if(!voice) return console.log("Voice not connected");
+
+  var encoder = voice.voiceConnection.createExternalEncoder({
+    type: "ffmpeg",
+    source: file,
+    format: "opus",
+    outputArgs: ['-af', `volume=${config.volume}`],
+    debug: false
+  });
+  if(!encoder) return console.log("No encoder");
+
+  encoder.once("end", () => {
+    encoder.stop();
+  });
+
+  encoder.once("unpipe", () => {
+    encoder.destroy();
+    _delete = () => {
+      fs.unlink(file, (err) => {
+        if(err){
+          if(err.code == "EBUSY"){
+            //If the file is busy, wait 5 seconds and try again
+            setTimeout(_delete, 5000);
+          }
+          else return;
+        }
+      });
+    }
+    _delete();
+    if(!channel.guild) return;
+    if(music.songQ[channel.guild.id]) delete music.songQ[channel.guild.id].now;
+    delete music.votes[channel.guild.id];
+    processQueue(channel, client, config);
+  });
+
+  var encoderStream = encoder.play();
+  encoderStream.resetTimestamp();
+  encoderStream.removeAllListeners("timestamp");
+  encoderStream.on("timestamp", time => {});
+  return {encoderStream, encoder};
+};
+
+const processQueue = (channel, client, config) => {
+  if(music.songQ[channel.guild.id] && music.songQ[channel.guild.id].q.length != 0){
+    var next = music.songQ[channel.guild.id].q[0];
+    music.songQ[channel.guild.id].q.shift();
+    music.songQ[channel.guild.id].now = next;
+    music.streams[channel.guild.id] = playSong(next.filepath, channel, client, config);
+    channel.sendMessage(`🎶 Now Playing: **${next.title}**`);
+    if (config.displaySongAsGame) client.User.setGame({name: next.title});
+  }else{
+    delete music.songQ[channel.guild.id];
+    if (config.displaySongAsGame && !config.showDefaultGame) client.User.setGame({name: null});
+    if (config.showDefaultGame) client.User.setGame(config.defaultGame);
+  }
+};
+
+const calculateVotes = users => {
+  if (users == 1 || users == 2) {
+    return 0
+  } else if (users == 3 || users == 4) {
+    return 2
+  } else if (users > 7) {
+    return 5
+  } else if (users > 4) {
+    return 3
+  } else {
+    return 6
+  }
+};
+
+const getTimeInBetween = (now, starttime) => {
+  var t = Date.parse(now) - Date.parse(starttime);
+  var seconds = Math.floor( (t/1000) % 60 );
+  var minutes = Math.floor( (t/1000/60) % 60 );
+  var hours = Math.floor( (t/(1000*60*60)) % 24 );
+  var days = Math.floor( t/(1000*60*60*24) );
+  return {
+    'total': t,
+    'days': days,
+    'hours': hours,
+    'minutes': minutes,
+    'seconds': seconds
+  };
 }
-})
 
-bot.login(process.env.bitch);
+/* EXIT HANDLING */
+process.stdin.resume();
+
+const disconnect = err => {
+  if (err){
+    console.log(err);
+    console.log(err.stack);
+  }
+  client.disconnect();
+  process.exit();
+};
+process.on('exit', disconnect);
+process.on('SIGINT', disconnect);
+process.on('uncaughtException', disconnect);
