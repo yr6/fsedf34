@@ -4,7 +4,7 @@ const ytpl = require('ytpl');
 const Discord = require('discord.js');
 const PACKAGE = require('./package.json');
 const client = new Discord.Client();
-const client = require("discord.js-musicbot-addon");
+const music = require("discord.js-musicbot-addon");
 
 exports.start = (client, options) => {
 try {
