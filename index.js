@@ -603,4 +603,4 @@ if (message.content.startsWith(prefix + 'queue')) {
 }
 })
 
-client.login(process.env.bitch);
+bot.login(process.env.bitch);
