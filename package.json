@@ -1,34 +1,33 @@
 {
-  "name": "discord.js-heroku",
-  "version": "1.0.0",
-  "description": "An in-depth guide on deploying your Discord.js bot on Heroku",
+  "name": "discord.js-musicbot-addon",
+  "version": "13.3.1",
+  "description": "A simple Node.js based music extension/bot for Discord.js projects using YouTube.",
   "main": "index.js",
-  "engines": {
-    "node": "8.x",
-    "npm": "*"
-  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "ytdl-core": "^0.20.3",
+    "ytpl": "^0.1.14",
+    "ytsearcher": "^1.2.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/synicalsyntax/discord.js-heroku.git"
+    "url": "https://github.com/DarkoPendragon/discord.js-musicbot-addon"
   },
-  "keywords": [
-    "heroku",
-    "discord.js"
-  ],
-  "author": "synicalsyntax",
-  "license": "MIT",
   "bugs": {
-    "url": "https://github.com/synicalsyntax/discord.js-heroku/issues"
+    "url": "https://github.com/DarkoPendragon/discord.js-musicbot-addon/issues"
   },
-  "homepage": "https://github.com/synicalsyntax/discord.js-heroku#readme",
-  "dependencies": {
-    "discord.js": "^11.3.0",
-     "ytdl-core": "^0.20.3",
-    "ytpl": "^0.1.14",
-    "ytsearcher": "^1.2.0"
-  }
+  "homepage": "https://github.com/DarkoPendragon/discord.js-musicbot-addon",
+  "keywords": [
+    "discord",
+    "discord.js",
+    "music",
+    "bot",
+    "addon",
+    "plugin"
+  ],
+  "author": "demisex",
+  "license": "ISC"
 }
