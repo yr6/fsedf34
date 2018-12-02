@@ -1,1 +1,9 @@
-
+{
+  "client_id": "518180972014075904",
+  "prefix": "R!",
+  "owner_id": "246220920199446528",
+  "status": "online",
+  "youtube_api_key": "AIzaSyD8G7jHMxTAtPeVGvRxG4xgIuTLjrXcdPQ",
+  "admins": "246220920199446528",
+  "server_port":"8080"
+}
