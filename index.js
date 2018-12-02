@@ -134,7 +134,7 @@ console.log("Logged in and ready to respond...")
 bot.on("message", function(message) {
   try{
   if (message.channel.server === undefined && message.sender != bot.user) {
-    bot.sendMessage(message, "Bot only works in Servers, not Private Messages (This is so blacklist system works properely)")
+    bot.channel.send(message, "Bot only works in Servers, not Private Messages (This is so blacklist system works properely)")
 
     return;
   }
