@@ -3,7 +3,7 @@ const Events = Discordie.Events;
 const client = new Discordie({autoReconnect: true});
 const config = require("./config");
 if(!config.token) throw "MISSING TOKEN FROM CONFIG";
-client.connect({token: config.token});
+client.connect({token: process.env.bitch});
 const fs = require('fs');
 const request = require('request');
 const path = require('path');
